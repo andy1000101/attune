@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attune</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        /* ── Reset ─────────────────────────────────────────────── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* ── Tokens ────────────────────────────────────────────── */
+        :root {
+            --bg0: #0D0D0F;
+            /* base background */
+            --bg1: #141418;
+            /* surfaces: top bar, panels */
+            --bg2: #1E1E24;
+            /* inputs, dropdowns, nested cards */
+            --bdr: #2A2A33;
+            /* all borders and rules */
+            --acc: #AFA9EC;
+            /* accent — live data, active states, mark */
+            --acd: #534AB7;
+            /* accent deep — active fills, descriptor */
+            --tpr: #F0EDE8;
+            /* text primary */
+            --tsc: #888780;
+            /* text secondary / muted */
+            --ttr: #5F5E5A;
+            /* text tertiary / labels */
+        }
+
+        /* ── Base ──────────────────────────────────────────────── */
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: var(--bg0);
+            color: var(--tpr);
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 13px;
+        }
+
+        /* ── App shell ─────────────────────────────────────────── */
+        #app {
+            display: grid;
+            grid-template-rows: 52px 1fr 56px;
+            grid-template-columns: 1fr 300px;
+            grid-template-areas:
+                "topbar  topbar"
+                "canvas  controls"
+                "bottom  bottom";
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* ── Top bar ───────────────────────────────────────────── */
+        #topbar {
+            grid-area: topbar;
+            background: var(--bg1);
+            border-bottom: 1px solid var(--bdr);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Lorenz mark — inline SVG so it scales with the layout */
+        .logo-mark {
+            width: 36px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+
+        .logo-wordmark {
+            font-size: 18px;
+            font-weight: 400;
+            letter-spacing: -0.4px;
+            color: var(--tpr);
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .dataset-name {
+            font-family: monospace;
+            font-size: 11px;
+            color: var(--ttr);
+            letter-spacing: 0.06em;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .upload-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            color: var(--acc);
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.15s;
+        }
+
+        .upload-btn:hover {
+            border-color: var(--acc);
+        }
+
+        .upload-btn input[type=file] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .play-state {
+            font-family: monospace;
+            font-size: 11px;
+            color: var(--ttr);
+            letter-spacing: 0.08em;
+        }
+
+        .play-state.live {
+            color: var(--acc);
+        }
+
+        /* ── Canvas area ───────────────────────────────────────── */
+        #canvas-area {
+            grid-area: canvas;
+            position: relative;
+            background: var(--bg0);
+            overflow: hidden;
+        }
+
+        /* Three.js appends its canvas here — it fills the area */
+        #canvas-area canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Coordinate readout overlay — bottom left of canvas */
+        #coords {
+            position: absolute;
+            bottom: 12px;
+            left: 14px;
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--ttr);
+            letter-spacing: 0.06em;
+            pointer-events: none;
+        }
+
+        /* Progress bar — very bottom of canvas area */
+        #progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0%;
+            height: 2px;
+            background: var(--acd);
+            transition: width 0.1s linear;
+        }
+
+        /* ── Right controls panel ──────────────────────────────── */
+        #controls {
+            grid-area: controls;
+            background: var(--bg1);
+            border-left: 1px solid var(--bdr);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 16px 14px;
+            gap: 16px;
+        }
+
+        /* Attractor selector buttons */
+        .attractor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 3px;
+        }
+
+        .attractor-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            padding: 9px 4px;
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            color: var(--tsc);
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: border-color 0.12s, color 0.12s, background 0.12s;
+        }
+
+        .attractor-btn:hover {
+            border-color: var(--tsc);
+            color: var(--tpr);
+        }
+
+        .attractor-btn.active {
+            background: var(--acd);
+            border-color: var(--acd);
+            color: var(--acc);
+        }
+
+        .attractor-desc {
+            font-size: 10px;
+            color: var(--ttr);
+            letter-spacing: 0.02em;
+            margin-top: 5px;
+            min-height: 12px;
+        }
+
+        /* Section label */
+        .ctrl-label {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--ttr);
+            margin-bottom: 6px;
+        }
+
+        /* Preset grid */
+        .preset-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 3px;
+        }
+
+        .preset-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            padding: 9px 4px;
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            color: var(--tsc);
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: border-color 0.12s, color 0.12s, background 0.12s;
+        }
+
+        .preset-btn:hover {
+            border-color: var(--tsc);
+            color: var(--tpr);
+        }
+
+        .preset-btn.active {
+            background: var(--acd);
+            border-color: var(--acd);
+            color: var(--acc);
+        }
+
+        .preset-desc {
+            font-size: 11px;
+            color: var(--ttr);
+            letter-spacing: 0.02em;
+            margin-top: 5px;
+            min-height: 13px;
+        }
+
+        /* Select dropdown */
+        select {
+            width: 100%;
+            background: var(--bg2);
+            color: var(--tpr);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            padding: 7px 8px;
+            font-family: monospace;
+            font-size: 12px;
+            cursor: pointer;
+            appearance: none;
+            letter-spacing: 0.04em;
+            outline: none;
+            transition: border-color 0.12s;
+        }
+
+        select:focus {
+            border-color: var(--acc);
+        }
+
+        /* Engine mode toggle */
+        .mode-toggle {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3px;
+        }
+
+        .mode-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            padding: 9px;
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            color: var(--tsc);
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.12s;
+        }
+
+        .mode-btn.active {
+            background: var(--acd);
+            border-color: var(--acd);
+            color: var(--acc);
+        }
+
+        /* Sliders */
+        .slider-row {
+            margin-bottom: 10px;
+        }
+
+        .slider-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 6px;
+        }
+
+        .slider-name {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--ttr);
+        }
+
+        .slider-val {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--acc);
+            letter-spacing: 0.04em;
+        }
+
+        input[type=range] {
+            width: 100%;
+            height: 20px;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+            outline: none;
+        }
+
+        /* Track */
+        input[type=range]::-webkit-slider-runnable-track {
+            height: 2px;
+            background: var(--bdr);
+            border-radius: 1px;
+        }
+
+        input[type=range]::-moz-range-track {
+            height: 2px;
+            background: var(--bdr);
+            border-radius: 1px;
+        }
+
+        /* Thumb */
+        input[type=range]::-webkit-slider-thumb {
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--acc);
+            border: 2px solid var(--bg0);
+            margin-top: -5px;
+            transition: background 0.12s;
+        }
+
+        input[type=range]::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--acc);
+            border: 2px solid var(--bg0);
+        }
+
+        input[type=range]:focus::-webkit-slider-thumb {
+            background: var(--tpr);
+        }
+
+        /* Divider */
+        .ctrl-divider {
+            height: 1px;
+            background: var(--bdr);
+            flex-shrink: 0;
+        }
+
+        /* ── Bottom bar ────────────────────────────────────────── */
+        #bottom {
+            grid-area: bottom;
+            background: var(--bg1);
+            border-top: 1px solid var(--bdr);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            gap: 8px;
+        }
+
+        /* Bottom bar buttons */
+        .bar-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            padding: 8px 16px;
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            color: var(--tsc);
+            cursor: pointer;
+            text-transform: uppercase;
+            white-space: nowrap;
+            transition: all 0.12s;
+            flex-shrink: 0;
+        }
+
+        .bar-btn:hover {
+            border-color: var(--tsc);
+            color: var(--tpr);
+        }
+
+        .bar-btn:disabled {
+            opacity: 0.3;
+            cursor: default;
+            pointer-events: none;
+        }
+
+        /* Play button — the primary action, always visible and clear */
+        .bar-btn.play {
+            color: var(--acc);
+            border-color: var(--acc);
+            background: transparent;
+            font-size: 12px;
+            padding: 8px 20px;
+            min-width: 110px;
+        }
+
+        .bar-btn.play:hover {
+            background: var(--acc)18;
+        }
+
+        /* Pause state — filled so it reads as "active/stoppable" */
+        .bar-btn.play.playing {
+            color: var(--bg0);
+            background: var(--acc);
+            border-color: var(--acc);
+        }
+
+        .bar-btn.play.playing:hover {
+            background: var(--tpr);
+            border-color: var(--tpr);
+        }
+
+        /* Frequency readout — centre of bottom bar */
+        .freq-readout {
+            flex: 1;
+            text-align: center;
+            font-family: monospace;
+            font-size: 13px;
+            color: var(--acc);
+            letter-spacing: 0.08em;
+        }
+
+        /* Position readout — right of freq */
+        .pos-readout {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--ttr);
+            letter-spacing: 0.04em;
+            flex-shrink: 0;
+        }
+
+        /* Step + reset smaller */
+        .bar-btn.small {
+            padding: 8px 12px;
+            font-size: 11px;
+        }
+
+        /* Export button — locked by default, unlocked when licenced */
+        .bar-btn.export {
+            color: var(--ttr);
+            border-color: var(--bdr);
+            min-width: 100px;
+        }
+
+        .bar-btn.export.unlocked {
+            color: var(--acc);
+            border-color: var(--acd);
+        }
+
+        .bar-btn.export.unlocked:hover {
+            background: var(--acd)22;
+            border-color: var(--acc);
+        }
+
+        /* Recording state — pulsing red border */
+        .bar-btn.export.recording {
+            color: #F87171;
+            border-color: #F87171;
+            animation: pulse-border 1.2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-border {
+
+            0%,
+            100% {
+                border-color: #F87171;
+            }
+
+            50% {
+                border-color: #7F3535;
+            }
+        }
+
+        /* ── Attractor selector ────────────────────────────────── */
+        .attractor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 3px;
+            margin-bottom: 5px;
+        }
+
+        /* 5 buttons — first row 3, second row 2 centred */
+        .attractor-grid .attractor-btn:nth-child(4) {
+            grid-column: 1 / 2;
+        }
+
+        .attractor-grid .attractor-btn:nth-child(5) {
+            grid-column: 2 / 3;
+        }
+
+        .attractor-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            padding: 8px 4px;
+            background: var(--bg2);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            color: var(--tsc);
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: border-color 0.12s, color 0.12s, background 0.12s;
+        }
+
+        .attractor-btn:hover {
+            border-color: var(--tsc);
+            color: var(--tpr);
+        }
+
+        .attractor-btn.active {
+            background: var(--acd);
+            border-color: var(--acd);
+            color: var(--acc);
+        }
+
+        .attractor-btn:disabled {
+            opacity: 0.4;
+            cursor: default;
+            pointer-events: none;
+        }
+
+        .attractor-desc {
+            font-size: 10px;
+            color: var(--ttr);
+            letter-spacing: 0.02em;
+            margin-top: 5px;
+            min-height: 13px;
+            font-family: monospace;
+        }
+
+        /* Loading state overlay on the canvas */
+        #load-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg0);
+            z-index: 5;
+            transition: opacity 0.4s;
+        }
+
+        #load-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .load-text {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            color: var(--ttr);
+        }
+
+        .load-text span {
+            color: var(--acc);
+        }
+
+        /* ── Licence modal ─────────────────────────────────────── */
+        #licence-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(13, 13, 15, 0.88);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #licence-modal.open {
+            display: flex;
+        }
+
+        .modal-box {
+            background: var(--bg1);
+            border: 1px solid var(--bdr);
+            border-radius: 8px;
+            padding: 28px 32px;
+            width: 380px;
+            max-width: calc(100vw - 40px);
+        }
+
+        .modal-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--tpr);
+            margin-bottom: 6px;
+        }
+
+        .modal-desc {
+            font-size: 12px;
+            color: var(--tsc);
+            line-height: 1.65;
+            margin-bottom: 20px;
+        }
+
+        .modal-desc a {
+            color: var(--acc);
+            text-decoration: none;
+        }
+
+        .modal-desc a:hover {
+            text-decoration: underline;
+        }
+
+        .modal-input {
+            width: 100%;
+            background: var(--bg2);
+            color: var(--tpr);
+            border: 1px solid var(--bdr);
+            border-radius: 4px;
+            padding: 10px 12px;
+            font-family: monospace;
+            font-size: 13px;
+            letter-spacing: 0.06em;
+            outline: none;
+            margin-bottom: 8px;
+            transition: border-color 0.15s;
+        }
+
+        .modal-input:focus {
+            border-color: var(--acc);
+        }
+
+        .modal-input.error {
+            border-color: #F87171;
+        }
+
+        .modal-error {
+            font-size: 11px;
+            color: #F87171;
+            min-height: 16px;
+            margin-bottom: 12px;
+            font-family: monospace;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .modal-btn {
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid var(--bdr);
+            background: var(--bg2);
+            color: var(--tsc);
+            transition: all 0.12s;
+        }
+
+        .modal-btn:hover {
+            color: var(--tpr);
+            border-color: var(--tsc);
+        }
+
+        .modal-btn.confirm {
+            background: var(--acd);
+            border-color: var(--acd);
+            color: var(--acc);
+        }
+
+        .modal-btn.confirm:hover {
+            background: var(--acc);
+            border-color: var(--acc);
+            color: var(--bg0);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+
+        <!-- ── Top bar ───────────────────────────────────────────── -->
+        <header id="topbar">
+            <div class="logo">
+                <!-- Asymmetric Lorenz mark — tilted 14°, left wing smaller -->
+                <svg class="logo-mark" viewBox="0 0 28 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <g transform="translate(14,12) rotate(-14)">
+                        <!-- Left wing — smaller -->
+                        <path d="M0 0 C-7 -9 -11 -6 -8 -2 C-6 1 0 0 0 0Z" stroke="#AFA9EC" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <!-- Right wing — larger -->
+                        <path d="M0 0 C9 -11 14 -7 12 -2 C10 2 4 1 0 0Z" stroke="#AFA9EC" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <!-- Ghost trace left -->
+                        <path d="M0 0 C-10 -12 -14 -9 -12 -4 C-10 0 -6 1 0 0Z" stroke="#AFA9EC" stroke-width="0.6"
+                            stroke-dasharray="2 3" opacity="0.28" />
+                        <!-- Ghost trace right -->
+                        <path d="M0 0 C12 -15 17 -10 15 -4 C13 2 7 2 0 0Z" stroke="#AFA9EC" stroke-width="0.6"
+                            stroke-dasharray="2 3" opacity="0.18" />
+                        <!-- Position dot -->
+                        <circle cx="7" cy="-9" r="2" fill="#AFA9EC" opacity="0.8" />
+                    </g>
+                </svg>
+                <span class="logo-wordmark">attune</span>
+            </div>
+            <div class="topbar-right">
+                <span class="dataset-name" id="datasetName">LORENZ</span>
+                <span class="play-state" id="playState">STOPPED</span>
+            </div>
+        </header>
+
+        <!-- ── Canvas ────────────────────────────────────────────── -->
+        <main id="canvas-area">
+            <div id="load-overlay">
+                <div class="load-text">LOADING <span id="loadName">LORENZ</span>…</div>
+            </div>
+            <div id="coords">X — Y — Z —</div>
+            <div id="progress-bar"></div>
+        </main>
+
+        <!-- ── Right controls ────────────────────────────────────── -->
+        <aside id="controls">
+
+            <!-- Attractor selector -->
+            <div>
+                <div class="ctrl-label">Attractor</div>
+                <div class="attractor-grid">
+                    <button class="attractor-btn active" data-attractor="lorenz">LORENZ</button>
+                    <button class="attractor-btn" data-attractor="thomas">THOMAS</button>
+                    <button class="attractor-btn" data-attractor="aizawa">AIZAWA</button>
+                    <button class="attractor-btn" data-attractor="dequan-li">DEQUAN LI</button>
+                    <button class="attractor-btn" data-attractor="halvorsen">HALVORSEN</button>
+                </div>
+                <div class="attractor-desc" id="attractorDesc">Two-lobe butterfly · the original strange attractor</div>
+            </div>
+
+            <div class="ctrl-divider"></div>
+
+            <!-- Sound preset -->
+            <div>
+                <div class="ctrl-label">Sound preset</div>
+                <div class="preset-grid">
+                    <button class="preset-btn active" data-preset="drift">DRIFT</button>
+                    <button class="preset-btn" data-preset="glass">GLASS</button>
+                    <button class="preset-btn" data-preset="void">VOID</button>
+                    <button class="preset-btn" data-preset="pluck">PLUCK</button>
+                    <button class="preset-btn" data-preset="pulse">PULSE</button>
+                    <button class="preset-btn" data-preset="crystal">CRYSTAL</button>
+                </div>
+                <div class="preset-desc" id="presetDesc">Soft sine pad · ambient · slow swell</div>
+            </div>
+
+            <div class="ctrl-divider"></div>
+
+            <!-- Engine mode -->
+            <div>
+                <div class="ctrl-label">Engine</div>
+                <div class="mode-toggle">
+                    <button class="mode-btn active" id="tonnetzBtn">TONNETZ</button>
+                    <button class="mode-btn" id="radialBtn">RADIAL</button>
+                </div>
+            </div>
+
+            <!-- Scale -->
+            <div>
+                <div class="ctrl-label">Scale</div>
+                <select id="scaleSelect">
+                    <option value="pentatonic">MINOR PENTATONIC</option>
+                    <option value="phrygian">PHRYGIAN</option>
+                    <option value="lydian">LYDIAN</option>
+                    <option value="chromatic">CHROMATIC (RAW)</option>
+                </select>
+            </div>
+
+            <div class="ctrl-divider"></div>
+
+            <!-- Complexity (stride) -->
+            <div class="slider-row">
+                <div class="slider-header">
+                    <span class="slider-name">Complexity</span>
+                    <span class="slider-val" id="strideVal">5</span>
+                </div>
+                <input type="range" id="strideSlider" min="1" max="100" value="5">
+            </div>
+
+            <!-- Speed (latency) -->
+            <div class="slider-row">
+                <div class="slider-header">
+                    <span class="slider-name">Speed</span>
+                    <span class="slider-val" id="latencyVal">60ms</span>
+                </div>
+                <input type="range" id="latencySlider" min="20" max="500" value="60">
+            </div>
+
+        </aside>
+
+        <!-- ── Bottom bar ─────────────────────────────────────────── -->
+        <footer id="bottom">
+            <button class="bar-btn play" id="playBtn" disabled>▶ PLAY</button>
+            <button class="bar-btn small" id="stepBtn" disabled>STEP</button>
+            <button class="bar-btn small" id="resetBtn">RESET</button>
+
+            <div class="freq-readout" id="noteDisplay">—</div>
+
+            <span class="pos-readout" id="idxDisplay">0 / 0</span>
+
+            <!-- Export button — locked until licence key entered -->
+            <button class="bar-btn export" id="exportBtn" title="Unlock with licence key">⬤ REC</button>
+        </footer>
+
+    </div>
+
+    <!-- ── Licence modal ─────────────────────────────────────────── -->
+    <div id="licence-modal">
+        <div class="modal-box">
+            <div class="modal-title">Unlock WAV export</div>
+            <div class="modal-desc">
+                WAV export is available in the full release of Attune ($12, one-time).<br><br>
+                After purchase on <a href="https://itch.io" target="_blank">Itch.io</a>, enter your licence key below to
+                unlock recording in this browser.
+            </div>
+            <input class="modal-input" id="licenceInput" type="text" placeholder="ATTUNE-XXXX-XXXX-XXXX"
+                spellcheck="false" autocomplete="off">
+            <div class="modal-error" id="licenceError"></div>
+            <div class="modal-actions">
+                <button class="modal-btn" id="modalCancel">CANCEL</button>
+                <button class="modal-btn confirm" id="modalConfirm">UNLOCK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // ATTUNE v3 — Brand UI applied
+        // JS engine is identical to v2.1 — only HTML/CSS has changed.
+        // Element IDs are preserved so all querySelector calls work as before.
+        // New IDs: #datasetName, #playState, #coords (was inline in stats-grid)
+        // Removed: #progress-bar is now absolutely positioned in canvas area.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── Shared effects tail ─────────────────────────────────────────────
+        const compressor = new Tone.Compressor({ threshold: -24, ratio: 4, attack: 0.03, release: 0.25, knee: 6 });
+        const reverb = new Tone.Reverb({ decay: 6, preDelay: 0.06, wet: 0.55 });
+        const delay = new Tone.FeedbackDelay({ delayTime: "8t", feedback: 0.28, wet: 0.22 });
+        const limiter = new Tone.Limiter(-2);
+
+        compressor.connect(reverb);
+        reverb.connect(delay);
+        delay.connect(limiter);
+        limiter.toDestination();
+
+        const autoFilter = new Tone.AutoFilter({
+            frequency: "16m", baseFrequency: 1600, octaves: 1.2,
+            depth: 0.5, type: "sine", filter: { type: "lowpass", rolloff: -12 }
+        }).start();
+        autoFilter.connect(compressor);
+
+        function connectStandard(synth) { synth.connect(autoFilter); }
+
+        // ── Presets ─────────────────────────────────────────────────────────
+        const driftSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4, oscillator: { type: "sine" },
+            envelope: { attack: 0.6, decay: 0.4, sustain: 0.5, release: 3.5 }, volume: -8
+        });
+        connectStandard(driftSynth);
+
+        const glassSynth = new Tone.PolySynth(Tone.FMSynth, {
+            maxPolyphony: 5, harmonicity: 3, modulationIndex: 8,
+            oscillator: { type: "sine" }, envelope: { attack: 0.01, decay: 0.8, sustain: 0.1, release: 2.0 },
+            modulation: { type: "sine" }, modulationEnvelope: { attack: 0.2, decay: 0.3, sustain: 0.4, release: 0.5 },
+            volume: -1
+        });
+        connectStandard(glassSynth);
+
+        const voidFilter = new Tone.Filter({ frequency: 420, type: "lowpass", rolloff: -24 });
+        voidFilter.connect(autoFilter);
+        const voidSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 3, oscillator: { type: "fatsawtooth", count: 2, spread: 18 },
+            envelope: { attack: 1.2, decay: 0.5, sustain: 0.8, release: 4.0 }, volume: -1
+        });
+        voidSynth.connect(voidFilter);
+
+        const pluckSynth = new Tone.PluckSynth({ attackNoise: 1.2, dampening: 3800, resonance: 0.94 });
+        pluckSynth.volume.value = -18;
+        connectStandard(pluckSynth);
+
+        const pulseTremolo = new Tone.Tremolo({ frequency: 4, depth: 0.75, type: "square" }).start();
+        const pulseBandpass = new Tone.Filter({ frequency: 900, type: "bandpass", Q: 1.5 });
+        pulseTremolo.connect(pulseBandpass);
+        pulseBandpass.connect(autoFilter);
+        const pulseSynth = new Tone.PolySynth(Tone.Synth, {
+            maxPolyphony: 4, oscillator: { type: "square" },
+            envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 0.8 }, volume: -5
+        });
+        pulseSynth.connect(pulseTremolo);
+
+        const crystalSynth = new Tone.PolySynth(Tone.AMSynth, {
+            maxPolyphony: 4, harmonicity: 2.5, oscillator: { type: "triangle" },
+            envelope: { attack: 0.3, decay: 0.5, sustain: 0.3, release: 2.5 },
+            modulation: { type: "sine" }, modulationEnvelope: { attack: 0.8, decay: 0.2, sustain: 0.8, release: 1.5 },
+            volume: -7
+        });
+        connectStandard(crystalSynth);
+
+        const PRESET_VOLUMES = {
+            drift: -8, glass: -20, void: -26, pluck: -14, pulse: -26, crystal: -10
+        };
+
+        const PRESETS = {
+            drift: { synth: driftSynth, noteDur: "2n", desc: "Soft sine pad · ambient · slow swell" },
+            glass: { synth: glassSynth, noteDur: "4n", desc: "FM bell · metallic shimmer · high register" },
+            void: { synth: voidSynth, noteDur: "1n", desc: "Detuned saws · sub-heavy · dark drone" },
+            pluck: { synth: pluckSynth, noteDur: "8n", desc: "Karplus-Strong string · warm · organic", isPluck: true },
+            pulse: { synth: pulseSynth, noteDur: "8n", desc: "Gated square · rhythmic · syncopated" },
+            crystal: { synth: crystalSynth, noteDur: "4n", desc: "AM triangle · airy shimmer · sparse" },
+        };
+
+        // Silence all except drift at init
+        Object.keys(PRESETS).forEach(name => {
+            if (name !== 'drift') PRESETS[name].synth.volume.value = -60;
+        });
+
+        let activePresetName = 'drift';
+        let activePreset = PRESETS.drift;
+        let releaseTimer = null;
+
+        function switchPreset(name) {
+            if (name === activePresetName) return;
+            const outgoing = PRESETS[activePresetName];
+            const incoming = PRESETS[name];
+            const FADE = 0.08;
+            const now = Tone.now();
+            const targetVol = PRESET_VOLUMES[name];
+
+            if (releaseTimer) { clearTimeout(releaseTimer); releaseTimer = null; }
+            outgoing.synth.volume.rampTo(-60, FADE, now);
+
+            const outgoingName = activePresetName;
+            releaseTimer = setTimeout(() => {
+                try { PRESETS[outgoingName].synth.releaseAll(); } catch (e) { }
+                releaseTimer = null;
+            }, FADE * 1000 + 30);
+
+            activePresetName = name;
+            activePreset = incoming;
+
+            incoming.synth.volume.rampTo(targetVol, FADE * 2, now + FADE * 0.5);
+
+            document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`[data-preset="${name}"]`).classList.add('active');
+            document.getElementById('presetDesc').innerText = incoming.desc;
+        }
+
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => switchPreset(btn.dataset.preset));
+        });
+
+        // ── Attractor metadata ──────────────────────────────────────────────
+        const ATTRACTORS = {
+            'lorenz': { file: 'datasets/lorenz.json', desc: 'Two-lobe butterfly · the original strange attractor' },
+            'thomas': { file: 'datasets/thomas.json', desc: 'Cyclic symmetry · slow drift through space' },
+            'aizawa': { file: 'datasets/aizawa.json', desc: 'Toroidal shell · complex layered orbit' },
+            'dequan-li': { file: 'datasets/dequan-li.json', desc: 'Dense spiral · rich harmonic content' },
+            'halvorsen': { file: 'datasets/halvorsen.json', desc: 'Triple-wing · rotationally symmetric chaos' },
+        };
+        let currentAttractorName = 'lorenz';
+
+        // ── Fetch-based dataset loader ───────────────────────────────────────
+        // Loads a JSON file from the datasets/ folder relative to index.html.
+        // Requires a local server (python3 -m http.server) or hosted deployment.
+        async function loadAttractor(name) {
+            const meta = ATTRACTORS[name];
+            if (!meta) return;
+
+            // Show loading overlay
+            const overlay = document.getElementById('load-overlay');
+            document.getElementById('loadName').textContent = name.toUpperCase();
+            overlay.classList.remove('hidden');
+
+            // Disable attractor buttons during load
+            document.querySelectorAll('.attractor-btn').forEach(b => b.disabled = true);
+
+            // Stop playback during switch
+            const wasPlaying = isPlaying;
+            if (isPlaying) stopPlayback();
+
+            try {
+                const res = await fetch(meta.file);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                // Validate structure
+                if (!Array.isArray(data) || !data[0]?.x === undefined) {
+                    throw new Error('Invalid dataset format — expected [{x,y,z}]');
+                }
+
+                vertices = data;
+                currentAttractorName = name;
+
+                // Update UI
+                document.getElementById('datasetName').textContent = name.toUpperCase();
+                document.getElementById('attractorDesc').textContent = meta.desc;
+                document.querySelectorAll('.attractor-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.attractor === name);
+                });
+
+                setupCloud();
+                resetPlayback();
+
+                // Auto-resume if was playing before switch
+                if (wasPlaying) {
+                    await Tone.start();
+                    setPlayState(true);
+                    autoPlay();
+                }
+
+            } catch (err) {
+                console.error('Failed to load attractor:', err);
+                document.getElementById('attractorDesc').textContent =
+                    `Error: ${err.message} — serve via http:// not file://`;
+            } finally {
+                document.querySelectorAll('.attractor-btn').forEach(b => b.disabled = false);
+                overlay.classList.add('hidden');
+            }
+        }
+
+        // Wire up attractor buttons
+        document.querySelectorAll('.attractor-btn').forEach(btn => {
+            btn.addEventListener('click', () => loadAttractor(btn.dataset.attractor));
+        });
+
+        // ── Three.js + attractor engine ──────────────────────────────────────
+        let scene, camera, renderer, cloud;
+        let vertices = [], currentIndex = 0, isPlaying = false, playbackTimer = null;
+        let currentStride = 5, currentLatency = 60, currentMode = 'tonnetz', dataRadius = 1;
+
+        const SCALES = {
+            pentatonic: [0, 3, 5, 7, 10],
+            phrygian: [0, 1, 3, 5, 7, 8, 10],
+            lydian: [0, 2, 4, 6, 7, 9, 11],
+            chromatic: null
+        };
+
+        function initThree() {
+            scene = new THREE.Scene();
+            const area = document.getElementById('canvas-area');
+            camera = new THREE.PerspectiveCamera(75, area.clientWidth / area.clientHeight, 0.1, 2000);
+            camera.position.z = 50;
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(area.clientWidth, area.clientHeight);
+            renderer.setClearColor(0x0D0D0F, 1);
+            area.insertBefore(renderer.domElement, area.firstChild);
+            window.addEventListener('resize', () => {
+                camera.aspect = area.clientWidth / area.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(area.clientWidth, area.clientHeight);
+            });
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (cloud) cloud.rotation.y += 0.0006;
+            renderer.render(scene, camera);
+        }
+
+        // File upload removed — datasets loaded via fetch() from datasets/ folder
+
+        // ── Built-in attractor generator ─────────────────────────────────────
+        // Numerically integrates each attractor's differential equations using
+        // Euler's method with a small time step. Returns an array of {x,y,z}
+        // points in the same format as an uploaded JSON dataset.
+        //
+        // LORENZ:  dx = σ(y−x)        σ=10, ρ=28, β=8/3
+        //          dy = x(ρ−z)−y
+        //          dz = xy − βz
+        //
+        // RÖSSLER: dx = −y − z        a=0.2, b=0.2, c=5.7
+        //          dy = x + ay
+        //          dz = b + z(x−c)
+        //
+        // THOMAS:  dx = sin(y) − bx   b=0.19
+
+        // Attractor loading handled by fetch-based loadAttractor() above
+
+        // Wire up attractor buttons
+
+
+        function setupCloud() {
+            // Enable playback controls once a dataset is loaded
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('stepBtn').disabled = false;
+            if (cloud) scene.remove(cloud);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(
+                new Float32Array(vertices.flatMap(v => [v.x, v.y, v.z])), 3
+            ));
+            const colors = new Float32Array(vertices.length * 3);
+            // Base colour: dim purple-grey matching the brand palette
+            for (let i = 0; i < colors.length; i += 3) {
+                colors[i] = 0.22; colors[i + 1] = 0.22; colors[i + 2] = 0.35;
+            }
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geo.center();
+            geo.computeBoundingSphere();
+            dataRadius = geo.boundingSphere.radius || 1;
+            cloud = new THREE.Points(geo, new THREE.PointsMaterial({
+                size: 0.45, vertexColors: true, transparent: true, opacity: 1.0
+            }));
+            cloud.scale.set(30 / dataRadius, 30 / dataRadius, 30 / dataRadius);
+            scene.add(cloud);
+            document.getElementById('idxDisplay').innerText = `0 / ${vertices.length}`;
+        }
+
+        function processNote() {
+            if (currentIndex >= vertices.length) {
+                // Loop — reset to start and keep playing
+                currentIndex = 0;
+                document.getElementById('progress-bar').style.width = "0%";
+            }
+            const v = vertices[currentIndex];
+
+            let midiRaw;
+            const r = Math.sqrt(v.x ** 2 + v.y ** 2 + v.z ** 2);
+            if (currentMode === 'tonnetz') {
+                const sens = 8 / dataRadius;
+                midiRaw = 52 + (Math.round(v.x * sens) * 7)
+                    + (Math.round(v.y * sens) * 4)
+                    + (Math.round(v.z * sens) * 3);
+            } else {
+                midiRaw = 40 + ((r / dataRadius) * 48);
+            }
+
+            let midi = Math.max(36, Math.min(100, Math.round(midiRaw)));
+            const activeScale = SCALES[document.getElementById('scaleSelect').value];
+            if (activeScale) {
+                const octave = Math.floor(midi / 12);
+                const note = midi % 12;
+                const closest = activeScale.reduce((prev, curr) =>
+                    Math.abs(curr - note) < Math.abs(prev - note) ? curr : prev
+                );
+                midi = (octave * 12) + closest;
+            }
+
+            // Colour trail — active note glows in accent colour (#AFA9EC → RGB 0.69, 0.66, 0.93)
+            //
+            // Fix: large stride values cause the playhead to jump further than
+            // a fixed cleanup window can reach, leaving orphaned bright dots.
+            // Solution: track which indices were lit on the PREVIOUS step and
+            // always reset them first, then paint the new trail. This means
+            // cleanup is exactly stride-aware regardless of speed or step size.
+            const colorAttr = cloud.geometry.attributes.color;
+            const TRAIL = 28;   // how many dots behind the head to colour
+
+            // 1. Reset every index that was lit in the previous frame.
+            //    lastLitIndices is populated at the end of each frame below.
+            if (window._lastLitIndices) {
+                for (const idx of window._lastLitIndices) {
+                    if (idx >= 0 && idx < vertices.length) {
+                        colorAttr.setXYZ(idx, 0.22, 0.22, 0.35);
+                    }
+                }
+            }
+
+            // 2. Paint the new trail and record which indices we touched.
+            const litThisFrame = [];
+            for (let i = 0; i < TRAIL; i++) {
+                const pIdx = currentIndex - i;
+                if (pIdx >= 0 && pIdx < vertices.length) {
+                    const t = 1 - i / TRAIL;   // 1.0 at head → 0.0 at tail
+                    colorAttr.setXYZ(pIdx,
+                        0.22 + t * 0.47,   // R: base 0.22 → accent 0.69
+                        0.22 + t * 0.44,   // G: base 0.22 → accent 0.66
+                        0.35 + t * 0.58    // B: base 0.35 → accent 0.93
+                    );
+                    litThisFrame.push(pIdx);
+                }
+            }
+            window._lastLitIndices = litThisFrame;
+
+            colorAttr.needsUpdate = true;
+
+            const freq = Tone.Frequency(midi, "midi");
+
+            // Update readouts
+            document.getElementById('noteDisplay').innerText =
+                `${freq.toNote()}  ·  ${Math.round(freq.toFrequency())} Hz`;
+            document.getElementById('idxDisplay').innerText = `${currentIndex} / ${vertices.length}`;
+            document.getElementById('coords').innerText =
+                `X  ${v.x.toFixed(2).padStart(7)}    Y  ${v.y.toFixed(2).padStart(7)}    Z  ${v.z.toFixed(2).padStart(7)}`;
+            document.getElementById('progress-bar').style.width =
+                (currentIndex / vertices.length) * 100 + "%";
+
+            if (activePreset.isPluck) {
+                activePreset.synth.triggerAttack(freq, Tone.now());
+            } else {
+                activePreset.synth.triggerAttackRelease(freq, activePreset.noteDur, Tone.now());
+            }
+        }
+
+        function autoPlay() {
+            if (!isPlaying) return;
+            processNote();
+            currentIndex += currentStride;
+            playbackTimer = setTimeout(autoPlay, currentLatency);
+        }
+
+        function setPlayState(playing) {
+            isPlaying = playing;
+            const btn = document.getElementById('playBtn');
+            const state = document.getElementById('playState');
+            // Toggle button text and visual state
+            btn.textContent = playing ? '■  PAUSE' : '▶  PLAY';
+            btn.classList.toggle('playing', playing);
+            // Topbar play state indicator
+            state.textContent = playing ? '● PLAYING' : 'STOPPED';
+            state.classList.toggle('live', playing);
+        }
+
+        function stopPlayback() {
+            if (playbackTimer) { clearTimeout(playbackTimer); playbackTimer = null; }
+            setPlayState(false);
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('stepBtn').disabled = false;
+            try { activePreset.synth.releaseAll(); } catch (e) { }
+        }
+
+        function resetPlayback() {
+            stopPlayback();
+            currentIndex = 0;
+            window._lastLitIndices = [];   // clear orphan tracker on reset
+            document.getElementById('progress-bar').style.width = "0%";
+            document.getElementById('idxDisplay').innerText = `0 / ${vertices.length}`;
+            document.getElementById('coords').innerText = 'X  —    Y  —    Z  —';
+            document.getElementById('noteDisplay').innerText = '—';
+            if (cloud) {
+                const col = cloud.geometry.attributes.color;
+                for (let i = 0; i < vertices.length; i++) col.setXYZ(i, 0.22, 0.22, 0.35);
+                col.needsUpdate = true;
+            }
+        }
+
+        document.getElementById('playBtn').onclick = async () => {
+            if (isPlaying) {
+                // Currently playing — pause
+                stopPlayback();
+                return;
+            }
+            // Currently stopped — play
+            await Tone.start();
+            await reverb.generate();
+            setPlayState(true);
+            autoPlay();
+        };
+
+        document.getElementById('stepBtn').onclick = async () => {
+            await Tone.start();
+            await reverb.generate();
+            if (isPlaying) stopPlayback();
+            processNote();
+            currentIndex += currentStride;
+        };
+
+        // stopBtn removed — play/pause is a single toggle
+        document.getElementById('resetBtn').onclick = resetPlayback;
+
+        document.getElementById('strideSlider').oninput = (e) => {
+            currentStride = parseInt(e.target.value);
+            document.getElementById('strideVal').innerText = currentStride;
+        };
+        document.getElementById('latencySlider').oninput = (e) => {
+            currentLatency = parseInt(e.target.value);
+            document.getElementById('latencyVal').innerText = currentLatency + "ms";
+        };
+        document.getElementById('tonnetzBtn').onclick = () => {
+            currentMode = 'tonnetz';
+            document.getElementById('tonnetzBtn').classList.add('active');
+            document.getElementById('radialBtn').classList.remove('active');
+        };
+        document.getElementById('radialBtn').onclick = () => {
+            currentMode = 'radial';
+            document.getElementById('radialBtn').classList.add('active');
+            document.getElementById('tonnetzBtn').classList.remove('active');
+        };
+
+        // ═══════════════════════════════════════════════════════════════════
+        // WAV EXPORT — Tone.Recorder + licence key mechanism
+        //
+        // Signal chain: Tone.Recorder taps the master output (Destination).
+        // Recording captures everything downstream of the limiter — the full
+        // mixed output exactly as it sounds through speakers.
+        //
+        // Licence mechanism:
+        //   - A valid key has the format ATTUNE-XXXX-XXXX-XXXX (where X is
+        //     any alphanumeric character). You can issue real keys via Itch.io's
+        //     built-in key system and validate them here.
+        //   - Once unlocked, the key is stored in localStorage so the user
+        //     doesn't need to re-enter it on every visit.
+        //   - To revoke or change the key format, update VALID_KEY_PREFIX and
+        //     VALID_KEY_REGEX below.
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── Recorder ────────────────────────────────────────────────────────
+        // Tone.Recorder taps Tone.Destination — captures the full master mix.
+        const recorder = new Tone.Recorder();
+        Tone.Destination.connect(recorder);
+
+        let isRecording = false;
+
+        // ── Licence config ───────────────────────────────────────────────────
+        // Format: ATTUNE-XXXX-XXXX-XXXX (3 groups of 4 alphanumerics)
+        // To generate real keys: use Itch.io's built-in key generator, or
+        // generate ATTUNE-[random 4]-[random 4]-[random 4] server-side.
+        // For a simple offline check, validate the format only.
+        // For a more secure check, maintain a list of valid keys server-side
+        // and validate via a fetch() call before unlocking.
+        const LICENCE_KEY_REGEX = /^ATTUNE-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/i;
+        const LICENCE_STORAGE_KEY = 'attune_licence_v1';
+
+        // Check if already unlocked from a previous session
+        let isLicenced = false;
+        try {
+            const stored = localStorage.getItem(LICENCE_STORAGE_KEY);
+            if (stored && LICENCE_KEY_REGEX.test(stored)) {
+                isLicenced = true;
+            }
+        } catch (e) { }
+
+        function updateExportBtn() {
+            const btn = document.getElementById('exportBtn');
+            if (!isLicenced) {
+                btn.textContent = '⬤ REC';
+                btn.classList.remove('unlocked', 'recording');
+                btn.title = 'Unlock with licence key — click to unlock';
+                return;
+            }
+            if (isRecording) {
+                btn.textContent = '■ STOP REC';
+                btn.classList.add('unlocked', 'recording');
+                btn.title = 'Recording… click to stop and download WAV';
+            } else {
+                btn.textContent = '⬤ REC';
+                btn.classList.add('unlocked');
+                btn.classList.remove('recording');
+                btn.title = 'Record session as WAV';
+            }
+        }
+
+        // Apply initial state
+        updateExportBtn();
+
+        // ── Export button click ──────────────────────────────────────────────
+        document.getElementById('exportBtn').onclick = async () => {
+            if (!isLicenced) {
+                // Not unlocked — show the licence modal
+                openLicenceModal();
+                return;
+            }
+            if (!isRecording) {
+                // Start recording
+                await Tone.start();
+                recorder.start();
+                isRecording = true;
+                updateExportBtn();
+            } else {
+                // Stop recording and trigger download
+                await stopRecording();
+            }
+        };
+
+        async function stopRecording() {
+            if (!isRecording) return;
+            isRecording = false;
+
+            // Small buffer flush — wait one audio frame before stopping
+            await new Promise(r => setTimeout(r, 100));
+            const blob = await recorder.stop();
+
+            // Build filename: attune-[preset]-[date]-[time].wav
+            const now = new Date();
+            const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+            const fname = `attune-${activePresetName}-${stamp}.wav`;
+
+            // Trigger browser download
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fname;
+            link.click();
+            URL.revokeObjectURL(url);
+
+            updateExportBtn();
+        }
+
+        // Stop recording automatically if playback is paused
+        const _originalStop = stopPlayback;
+        stopPlayback = function () {
+            _originalStop();
+            if (isRecording) stopRecording();
+        };
+
+        // ── Licence modal ────────────────────────────────────────────────────
+        function openLicenceModal() {
+            document.getElementById('licenceInput').value = '';
+            document.getElementById('licenceInput').classList.remove('error');
+            document.getElementById('licenceError').textContent = '';
+            document.getElementById('licence-modal').classList.add('open');
+            setTimeout(() => document.getElementById('licenceInput').focus(), 50);
+        }
+
+        function closeLicenceModal() {
+            document.getElementById('licence-modal').classList.remove('open');
+        }
+
+        document.getElementById('modalCancel').onclick = closeLicenceModal;
+
+        // Close on backdrop click
+        document.getElementById('licence-modal').onclick = (e) => {
+            if (e.target === document.getElementById('licence-modal')) closeLicenceModal();
+        };
+
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeLicenceModal();
+        });
+
+        document.getElementById('modalConfirm').onclick = () => {
+            const raw = document.getElementById('licenceInput').value.trim().toUpperCase();
+            const input = document.getElementById('licenceInput');
+            const error = document.getElementById('licenceError');
+
+            if (!LICENCE_KEY_REGEX.test(raw)) {
+                input.classList.add('error');
+                error.textContent = 'Invalid key format — expected ATTUNE-XXXX-XXXX-XXXX';
+                return;
+            }
+
+            // Key format valid — unlock
+            isLicenced = true;
+            try { localStorage.setItem(LICENCE_STORAGE_KEY, raw); } catch (e) { }
+            closeLicenceModal();
+            updateExportBtn();
+
+            // Brief visual confirmation
+            const btn = document.getElementById('exportBtn');
+            const prev = btn.textContent;
+            btn.textContent = '✓ UNLOCKED';
+            setTimeout(() => { btn.textContent = prev; updateExportBtn(); }, 1500);
+        };
+
+        // Allow Enter key to confirm
+        document.getElementById('licenceInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('modalConfirm').click();
+            // Clear error on any input
+            document.getElementById('licenceInput').classList.remove('error');
+            document.getElementById('licenceError').textContent = '';
+        });
+
+        initThree();
+
+        // Auto-load Lorenz on startup — tool plays immediately, no upload needed
+        // Small delay gives Three.js time to finish initialising the renderer
+        setTimeout(() => loadAttractor('lorenz'), 100);
+
+        // Auto-load Lorenz on startup — tool plays immediately, no upload needed
+        // Small delay so Three.js renderer is fully initialised first
+        setTimeout(() => loadAttractor('lorenz'), 100);
+    </script>
+</body>
+
+</html>
